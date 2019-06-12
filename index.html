@@ -1,0 +1,195 @@
+<!-- 
+Bachelor thesis prototype
+Original work by Rasmus Lennartsson & Jonatan Edqvist
+
+APIs and different external resources used in the file belongs to
+their respective owners.
+
+Date: 2019/06/03
+
+© Rasmus Lennartsson & Jonatan Edqvist
+ -->
+
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+    <title>Web Chat: Chat bot</title>
+    
+    <style>
+      html, body { height: 100% }
+      body { margin: 0 }
+
+      #webchat {
+        height: 100%;
+        width: 100%;
+      }
+
+      .from-user.bubble{
+        background-color: #0078d7 !important;
+        color: #ffffff !important;
+      } 
+    </style>
+
+    <!-- Azure Insights -->
+    <script type="text/javascript">
+      var appInsights=window.appInsights||function(a){
+        function b(a){c[a]=function(){var b=arguments;c.queue.push(function(){c[a].apply(c,b)})}}var c={config:a},d=document,e=window;setTimeout(function(){var b=d.createElement("script");b.src=a.url||"https://az416426.vo.msecnd.net/scripts/a/ai.0.js",d.getElementsByTagName("script")[0].parentNode.appendChild(b)});try{c.cookie=d.cookie}catch(a){}c.queue=[];for(var f=["Event","Exception","Metric","PageView","Trace","Dependency"];f.length;)b("track"+f.pop());if(b("setAuthenticatedUserContext"),b("clearAuthenticatedUserContext"),b("startTrackEvent"),b("stopTrackEvent"),b("startTrackPage"),b("stopTrackPage"),b("flush"),!a.disableExceptionTracking){f="onerror",b("_"+f);var g=e[f];e[f]=function(a,b,d,e,h){var i=g&&g(a,b,d,e,h);return!0!==i&&c["_"+f](a,b,d,e,h),i}}return c
+        }({
+          instrumentationKey: "Key-here"
+        });
+
+      window.appInsights=appInsights,appInsights.queue&&0===appInsights.queue.length&&appInsights.trackPageView();
+    </script>
+  </head>
+  <body>
+    <div id="webchat" role="main"></div>
+  </body>
+</html>
+
+
+<!-- CDNs -->
+<script src="https://cdn.botframework.com/botframework-webchat/master/webchat.js"></script>
+<script src="http://ajax.googleapis.com/ajax/libs/jquery/1.9.0/jquery.min.js"></script>
+
+
+<script>
+  const getToken = new Promise((resolve, reject) => {
+    $.ajax({
+      url: "https://northeurope.api.cognitive.microsoft.com/sts/v1.0/issueToken",
+      beforeSend: function(xhrObj){
+        // Request headers
+        xhrObj.setRequestHeader("Ocp-Apim-Subscription-Key","Sub-key-here");
+      },
+      type: "POST",
+      // Request body
+      data: "{body}",
+    })
+    .done(function(data) {
+      var token = JSON.parse(atob(data.split(".")[1]));
+      console.log("getAuthTokenRegion: " + token.region);
+      console.log("getAuthTokenAuth: " + data);
+
+      if (data === undefined || token.region === undefined){
+        throw new Error("Could not fetch valid Authorization Token or region for Speech API. Undefined values. Aborting.");
+      }
+      else{
+        var region = token.region;
+        resolve({data, region});
+      }
+    })
+    .fail(function() {
+        throw new Error("Could not fetch Authorization Token for Speech API. Aborting.");
+    });
+  }); 
+
+  const getFirstAuthToken = new Promise((resolve, reject) => {
+    getToken.then(function(result){
+      localStorage.setItem("speechAuthorizationToken", result.data);
+      localStorage.setItem("speechRegion", result.region);
+      resolve("Token and region fetched.");
+    });
+  });
+
+  async function updateAuthToken(){
+    $.ajax({
+    url: "https://northeurope.api.cognitive.microsoft.com/sts/v1.0/issueToken",
+    beforeSend: function(xhrObj){
+        // Request headers
+        xhrObj.setRequestHeader("Ocp-Apim-Subscription-Key","Sub-key-here");
+    },
+    type: "POST",
+    // Request body
+    data: "{body}",
+    })
+    .done(function(data) {
+        var token = JSON.parse(atob(data.split(".")[1]));
+        console.log("getAuthTokenRegion: " + token.region);
+        console.log("getAuthTokenAuth: " + data);
+
+        if (data === undefined || token.region === undefined){
+          console.warn("Could not fetch new valid Authorization Token for Speech API. Undefined values.");
+        }
+        else{
+          localStorage.setItem("speechAuthorizationToken", data);
+          console.log("Token updated.");
+        }  
+    })
+    .fail(function(error) {
+        console.warn("Could not fetch new Authorization Token for Speech API.");
+    });     
+  }
+
+  const refreshToken = function(){
+    return new Promise(resolve => {
+      if(localStorage.getItem("speechAuthorizationToken")){
+        resolve(localStorage.getItem("speechAuthorizationToken"));
+      }else{
+        throw new Error("No cached token found for Speech Services.");
+      }
+    });
+  }
+
+  // Using token
+  async function createHybridPonyfillFactory() {
+    const speechServicesPonyfillFactory = await window.WebChat.createCognitiveServicesSpeechServicesPonyfillFactory({ authorizationToken: refreshToken, region: localStorage.getItem("speechRegion") });
+    const webSpeechPonyfillFactory = await window.WebChat.createBrowserWebSpeechPonyfillFactory();
+    return options => {
+      // We are using two ponyfill factories to create two concrete ponyfills.
+      const speechServicesPonyfill = speechServicesPonyfillFactory(options);
+      const webSpeechPonyfill = webSpeechPonyfillFactory(options);
+      // And we are merging the result from two different ponyfills.
+      // We use browser-supported speech for speech-to-text, and Speech Services for text-to-speech.
+      return {
+        // Web Speech API
+        // SpeechGrammarList: webSpeechPonyfill.SpeechGrammarList,
+        // SpeechRecognition: webSpeechPonyfill.SpeechRecognition,
+        // MCS Services API
+        SpeechGrammarList: speechServicesPonyfill.SpeechGrammarList,
+        SpeechRecognition: speechServicesPonyfill.SpeechRecognition,
+
+        // Turn text-to-speech on/off. Return null for off.
+        speechSynthesis: speechServicesPonyfill.speechSynthesis,
+        SpeechSynthesisUtterance: speechServicesPonyfill.SpeechSynthesisUtterance
+        // speechSynthesis: null,
+        // SpeechSynthesisUtterance: null
+      }
+    };
+  }
+
+  async function createChat(){
+    // Get Direct Line Authorization Token
+    /**********This part has to be in the same scope as window.WebChat.renderWebChat**********/
+    const res = await fetch('https://directline.botframework.com/v3/directline/tokens/generate', { 
+      method: 'POST', 
+      headers: {
+        "Authorization": "Bearer key-here"
+        }
+    });
+
+    const { token } = await res.json();
+    console.log("Received DLToken: " + token);
+    /******************************************************************************************/
+
+    if(token === undefined){
+      throw new Error("Could not fetch valid Direct Line Authorization Token. Aborting.");
+    }
+    else{
+      // Render web chat with microphone.
+      window.WebChat.renderWebChat({
+        webSpeechPonyfillFactory: await createHybridPonyfillFactory(),
+        directLine: window.WebChat.createDirectLine({ token }),
+        locale: 'en-US'
+      }, document.getElementById('webchat'));
+
+      document.querySelector('#webchat > *').focus();
+      console.log("Chat fully loaded");
+    }
+  }  
+
+  getFirstAuthToken.then(function(){
+    setInterval(updateAuthToken, 600000);  // Renew every 10min
+  }).then(function(){
+      createChat();
+  });
+</script>
