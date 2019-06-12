@@ -1,2 +1,2 @@
 # botframework-webchat
-Bachelor Thesis work - The web interface to the bot in azure.
+Bachelor Thesis prototype - The web interface to the bot in azure.
